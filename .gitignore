@@ -1,0 +1,42 @@
+# Go
+server/bridge
+server/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+
+# Kotlin / Gradle
+mobile/.gradle/
+mobile/build/
+mobile/composeApp/build/
+mobile/local.properties
+mobile/captures/
+mobile/.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
