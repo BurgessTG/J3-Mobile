@@ -6,6 +6,7 @@ import io.j3mobile.domain.OrchestrationStore
 import io.j3mobile.domain.ThreadRepository
 import io.j3mobile.protocol.ApprovalRequestId
 import io.j3mobile.protocol.ModelSelection
+import io.j3mobile.protocol.OrchestrationCheckpointSummary
 import io.j3mobile.protocol.OrchestrationMessage
 import io.j3mobile.protocol.OrchestrationSession
 import io.j3mobile.protocol.OrchestrationThread
@@ -16,6 +17,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/** Lightweight holder for a pending tool-approval request. */
+data class PendingApprovalInfo(
+    val requestId: ApprovalRequestId,
+    val kind: String,
+    val summary: String,
+)
 
 class ConversationViewModel(
     private val threadId: ThreadId,
@@ -41,6 +49,23 @@ class ConversationViewModel(
     val activities: StateFlow<List<OrchestrationThreadActivity>> =
         thread.map { it?.activities.orEmpty() }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val checkpoints: StateFlow<List<OrchestrationCheckpointSummary>> =
+        thread.map { it?.checkpoints.orEmpty() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** The most recent unresolved approval-request activity, if any. */
+    val pendingApproval: StateFlow<PendingApprovalInfo?> =
+        activities.map { list ->
+            list.lastOrNull { it.kind.contains("approval", ignoreCase = true) }
+                ?.let { activity ->
+                    PendingApprovalInfo(
+                        requestId = ApprovalRequestId(activity.id.value),
+                        kind = activity.kind,
+                        summary = activity.summary,
+                    )
+                }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun sendMessage(text: String, modelSelection: ModelSelection) {
         viewModelScope.launch {
