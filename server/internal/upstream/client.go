@@ -34,7 +34,15 @@ type Client struct {
 	ctx         context.Context
 	cancel      context.CancelFunc
 	requestSeq  atomic.Int64
+	lastErrorMu sync.RWMutex
+	lastError   string
 }
+
+const (
+	readWait  = 45 * time.Second
+	writeWait = 10 * time.Second
+	pingWait  = 20 * time.Second
+)
 
 // NewClient creates an upstream client targeting the given WebSocket URL.
 func NewClient(upstreamURL string, authToken string, logger zerolog.Logger) *Client {
@@ -55,16 +63,20 @@ func NewClient(upstreamURL string, authToken string, logger zerolog.Logger) *Cli
 // is established or the context is cancelled.
 func (c *Client) Connect(ctx context.Context) error {
 	if err := c.dial(ctx); err != nil {
+		c.setLastError(err)
 		return err
 	}
 
 	c.connected.Store(true)
 	c.reconnState.Reset()
+	c.clearLastError()
 
-	go c.readPump()
+	conn := c.connection()
+	go c.readPump(conn)
+	go c.pingLoop(conn)
 	go c.reconnectLoop()
 
-	c.logger.Info().Str("url", c.url).Msg("connected to upstream")
+	c.logger.Info().Str("url", sanitizeURL(c.url)).Msg("connected to upstream")
 	return nil
 }
 
@@ -86,6 +98,7 @@ func (c *Client) dial(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("upstream dial failed: %w", err)
 	}
+	configureConn(conn)
 
 	c.connMu.Lock()
 	c.conn = conn
@@ -137,19 +150,12 @@ func (c *Client) SendRequest(ctx context.Context, method string, params json.Raw
 	// Start tracking before sending so we never miss a fast reply.
 	ch := c.tracker.Track(id)
 
-	c.connMu.RLock()
-	conn := c.conn
-	c.connMu.RUnlock()
-
-	if conn == nil {
+	if c.connection() == nil {
 		c.tracker.Resolve(id, &rpcResponse{Error: &protocol.WsError{Message: "not connected"}})
 		return nil, fmt.Errorf("upstream not connected")
 	}
 
-	c.connMu.Lock()
-	err = c.conn.WriteMessage(websocket.TextMessage, msg)
-	c.connMu.Unlock()
-	if err != nil {
+	if err := c.writeMessage(msg); err != nil {
 		c.tracker.Resolve(id, &rpcResponse{Error: &protocol.WsError{Message: err.Error()}})
 		return nil, fmt.Errorf("write upstream: %w", err)
 	}
@@ -168,14 +174,11 @@ func (c *Client) SendRequest(ctx context.Context, method string, params json.Raw
 
 // ForwardRaw sends a raw WebSocket message upstream (for pass-through from mobile).
 func (c *Client) ForwardRaw(ctx context.Context, msg []byte) error {
-	c.connMu.Lock()
-	defer c.connMu.Unlock()
-
-	if c.conn == nil {
+	if c.connection() == nil {
 		return fmt.Errorf("upstream not connected")
 	}
 
-	return c.conn.WriteMessage(websocket.TextMessage, msg)
+	return c.writeMessage(msg)
 }
 
 // ForwardRequest forwards a raw request from a mobile client upstream,
@@ -188,21 +191,16 @@ func (c *Client) ForwardRequest(ctx context.Context, msg []byte) ([]byte, error)
 
 	ch := c.tracker.Track(req.ID)
 
-	c.connMu.Lock()
-	conn := c.conn
-	c.connMu.Unlock()
-
-	if conn == nil {
+	if c.connection() == nil {
+		response := c.errorResponse(req.ID, "upstream not connected")
 		c.tracker.Resolve(req.ID, &rpcResponse{Error: &protocol.WsError{Message: "not connected"}})
-		return nil, fmt.Errorf("upstream not connected")
+		return response, fmt.Errorf("upstream not connected")
 	}
 
-	c.connMu.Lock()
-	err := c.conn.WriteMessage(websocket.TextMessage, msg)
-	c.connMu.Unlock()
-	if err != nil {
+	if err := c.writeMessage(msg); err != nil {
+		response := c.errorResponse(req.ID, err.Error())
 		c.tracker.Resolve(req.ID, &rpcResponse{Error: &protocol.WsError{Message: err.Error()}})
-		return nil, fmt.Errorf("write upstream: %w", err)
+		return response, fmt.Errorf("write upstream: %w", err)
 	}
 
 	select {
@@ -214,7 +212,7 @@ func (c *Client) ForwardRequest(ctx context.Context, msg []byte) ([]byte, error)
 		}
 		return json.Marshal(wsResp)
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return c.errorResponse(req.ID, ctx.Err().Error()), ctx.Err()
 	}
 }
 
@@ -233,6 +231,7 @@ func (c *Client) Close() error {
 	c.connMu.Unlock()
 
 	c.connected.Store(false)
+	c.clearLastError()
 	c.tracker.RejectAll(fmt.Errorf("client closed"))
 
 	if conn != nil {
@@ -241,8 +240,14 @@ func (c *Client) Close() error {
 	return nil
 }
 
+func (c *Client) LastError() string {
+	c.lastErrorMu.RLock()
+	defer c.lastErrorMu.RUnlock()
+	return c.lastError
+}
+
 // readPump reads messages from upstream and dispatches them as responses or pushes.
-func (c *Client) readPump() {
+func (c *Client) readPump(conn *websocket.Conn) {
 	defer func() {
 		c.connected.Store(false)
 		c.tracker.RejectAll(fmt.Errorf("upstream connection lost"))
@@ -255,10 +260,6 @@ func (c *Client) readPump() {
 	}()
 
 	for {
-		c.connMu.RLock()
-		conn := c.conn
-		c.connMu.RUnlock()
-
 		if conn == nil {
 			return
 		}
@@ -269,6 +270,7 @@ func (c *Client) readPump() {
 				// Shutting down; don't log as error.
 				return
 			}
+			c.setLastError(err)
 			c.logger.Warn().Err(err).Msg("upstream read error")
 			return
 		}
@@ -290,6 +292,7 @@ func (c *Client) readPump() {
 				c.logger.Warn().Err(err).Msg("failed to parse upstream response")
 				continue
 			}
+			c.clearLastError()
 			c.tracker.Resolve(resp.ID, &rpcResponse{
 				Result: resp.Result,
 				Error:  resp.Error,
@@ -301,6 +304,7 @@ func (c *Client) readPump() {
 				c.logger.Warn().Err(err).Msg("failed to parse upstream push")
 				continue
 			}
+			c.clearLastError()
 			c.reconnState.SetLastSequence(push.Sequence)
 
 			if c.pushHandler != nil {
@@ -343,18 +347,22 @@ func (c *Client) reconnectLoop() {
 			}
 
 			if err := c.dial(c.ctx); err != nil {
+				c.setLastError(err)
 				c.logger.Warn().Err(err).Msg("reconnect attempt failed")
 				continue
 			}
 
 			c.connected.Store(true)
 			c.reconnState.Reset()
+			c.clearLastError()
 			c.logger.Info().Msg("reconnected to upstream")
 
 			// Fire a replay request to catch up on missed events.
 			c.requestReplay()
 
-			go c.readPump()
+			conn := c.connection()
+			go c.readPump(conn)
+			go c.pingLoop(conn)
 			break
 		}
 	}
@@ -387,4 +395,98 @@ func mustMarshal(v any) json.RawMessage {
 		panic(fmt.Sprintf("mustMarshal: %v", err))
 	}
 	return b
+}
+
+func (c *Client) errorResponse(id, message string) []byte {
+	resp, err := json.Marshal(protocol.WsResponse{
+		ID: id,
+		Error: &protocol.WsError{
+			Message: message,
+		},
+	})
+	if err != nil {
+		return nil
+	}
+	return resp
+}
+
+func (c *Client) connection() *websocket.Conn {
+	c.connMu.RLock()
+	defer c.connMu.RUnlock()
+	return c.conn
+}
+
+func (c *Client) writeMessage(msg []byte) error {
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
+
+	if c.conn == nil {
+		return fmt.Errorf("upstream not connected")
+	}
+
+	if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+		return err
+	}
+
+	return c.conn.WriteMessage(websocket.TextMessage, msg)
+}
+
+func (c *Client) pingLoop(conn *websocket.Conn) {
+	ticker := time.NewTicker(pingWait)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			if conn == nil {
+				return
+			}
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait)); err != nil {
+				c.setLastError(err)
+				c.logger.Warn().Err(err).Msg("upstream ping failed")
+				_ = conn.Close()
+				return
+			}
+		}
+	}
+}
+
+func configureConn(conn *websocket.Conn) {
+	_ = conn.SetReadDeadline(time.Now().Add(readWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(readWait))
+	})
+}
+
+func sanitizeURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsed.User = nil
+	query := parsed.Query()
+	for _, key := range []string{"token", "access_token", "auth", "authorization"} {
+		if query.Has(key) {
+			query.Set(key, "REDACTED")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func (c *Client) setLastError(err error) {
+	if err == nil {
+		return
+	}
+	c.lastErrorMu.Lock()
+	c.lastError = err.Error()
+	c.lastErrorMu.Unlock()
+}
+
+func (c *Client) clearLastError() {
+	c.lastErrorMu.Lock()
+	c.lastError = ""
+	c.lastErrorMu.Unlock()
 }

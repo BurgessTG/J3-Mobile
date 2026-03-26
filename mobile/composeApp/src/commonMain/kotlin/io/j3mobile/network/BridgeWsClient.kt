@@ -2,6 +2,7 @@ package io.j3mobile.network
 
 import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
+import io.ktor.http.HttpHeaders
 import io.ktor.websocket.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -14,7 +15,7 @@ import kotlin.time.Duration.Companion.milliseconds
 class BridgeWsClient(
     private val baseUrl: String,
     private val token: String,
-) {
+) : BridgeTransport {
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -25,10 +26,10 @@ class BridgeWsClient(
     }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
-    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val _pushEvents = MutableSharedFlow<WsPush>(extraBufferCapacity = 64)
-    val pushEvents: SharedFlow<WsPush> = _pushEvents.asSharedFlow()
+    override val pushEvents: SharedFlow<WsPush> = _pushEvents.asSharedFlow()
 
     private val counterMutex = Mutex()
     private var requestIdCounter = 0L
@@ -43,7 +44,7 @@ class BridgeWsClient(
     private var lastSequence = 0
 
     /** Connect to the bridge WebSocket. */
-    suspend fun connect(scope: CoroutineScope) {
+    override fun connect(scope: CoroutineScope) {
         connectionJob = scope.launch {
             connectInternal()
         }
@@ -55,8 +56,12 @@ class BridgeWsClient(
 
         while (true) {
             try {
-                val wsUrl = baseUrl.replace("http", "ws")
-                client.webSocket("$wsUrl/ws?token=$token") {
+                client.webSocket(
+                    urlString = baseUrl.toWebSocketUrl("/ws"),
+                    request = {
+                        headers.append(HttpHeaders.Authorization, "Bearer $token")
+                    },
+                ) {
                     session = this
                     _connectionState.value = ConnectionState.Connected(sessionId = "active")
                     attempt = 0
@@ -109,7 +114,7 @@ class BridgeWsClient(
     }
 
     /** Send an RPC request and wait for the response. */
-    suspend fun sendRequest(method: String, params: JsonObject = buildJsonObject {}): WsResponse {
+    override suspend fun sendRequest(method: String, params: JsonObject): WsResponse {
         val id = counterMutex.withLock { (++requestIdCounter).toString() }
         val body = buildJsonObject {
             put("_tag", JsonPrimitive(method))
@@ -135,8 +140,9 @@ class BridgeWsClient(
     }
 
     /** Disconnect and release resources. */
-    fun disconnect() {
+    override fun disconnect() {
         connectionJob?.cancel()
+        connectionJob = null
         session = null
         _connectionState.value = ConnectionState.Disconnected
         pendingRequests.values.forEach { it.cancel() }

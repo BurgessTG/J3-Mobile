@@ -23,8 +23,13 @@ Phone (KMP App)  <--WS/REST-->  Go Bridge Server  <--WS-->  T3 Code Server
 ```bash
 cd server
 cp .env.example .env  # configure T3 Code URL and auth
+go run ./cmd/pair-token create --name "Jacob iPhone"
 go run ./cmd/bridge
 ```
+
+The bridge is personal-only in this phase: one bridge fronts one personal T3 Code instance for one owner. It listens on loopback by default and is intended to be exposed remotely through Tailscale, not by binding to all interfaces.
+
+Bridge auth now defaults to opaque pairing tokens over `Authorization: Bearer <token>`. Legacy JWT auth is migration-only and is accepted only when `ALLOW_LEGACY_JWT=true`.
 
 ### Mobile App
 
@@ -32,8 +37,27 @@ Requires Android Studio or Xcode (on Mac for iOS).
 
 ```bash
 cd mobile
-./gradlew composeApp:installDebug  # Android
+./gradlew composeApp:compileDebugKotlinAndroid  # Android compile check
 ```
+
+For iOS, the `mobile/iosApp` folder contains the SwiftUI host shell that embeds `MainViewController()` from the shared KMP module. Wire that shell into an Xcode app target and run it in the simulator.
+
+### Remote Access With Tailscale
+
+Local simulator:
+
+```bash
+http://127.0.0.1:8181
+```
+
+Remote iPhone:
+
+```bash
+cd server
+./scripts/setup-tailscale-serve.sh
+```
+
+That exposes the local bridge through Tailscale HTTPS so the phone can use `https://<machine>.<tailnet>.ts.net` and `wss://<machine>.<tailnet>.ts.net/ws`.
 
 ## Development
 

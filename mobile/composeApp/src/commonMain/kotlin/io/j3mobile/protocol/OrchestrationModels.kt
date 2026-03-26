@@ -1,7 +1,14 @@
 package io.j3mobile.protocol
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 
 /** Top-level snapshot returned by getSnapshot. */
 @Serializable
@@ -63,12 +70,32 @@ data class OrchestrationMessage(
     val id: MessageId,
     val role: String,
     val text: String,
+    @Serializable(with = ChatAttachmentListSerializer::class)
     val attachments: List<ChatAttachment> = emptyList(),
     val turnId: TurnId? = null,
     val streaming: Boolean,
     val createdAt: String,
     val updatedAt: String,
 )
+
+object ChatAttachmentListSerializer : KSerializer<List<ChatAttachment>> {
+    private val delegate = ListSerializer(ChatAttachment.serializer())
+
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun deserialize(decoder: Decoder): List<ChatAttachment> {
+        val jsonDecoder = decoder as? JsonDecoder ?: return decoder.decodeSerializableValue(delegate)
+        val element = jsonDecoder.decodeJsonElement()
+        if (element is JsonNull) {
+            return emptyList()
+        }
+        return jsonDecoder.json.decodeFromJsonElement(delegate, element)
+    }
+
+    override fun serialize(encoder: Encoder, value: List<ChatAttachment>) {
+        encoder.encodeSerializableValue(delegate, value)
+    }
+}
 
 /** A file attachment on a message. */
 @Serializable

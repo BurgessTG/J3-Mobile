@@ -7,6 +7,5 @@ sealed class Screen {
     data object Projects : Screen()
     data class Threads(val projectId: ProjectId) : Screen()
     data class Conversation(val threadId: ThreadId) : Screen()
-    data class Terminal(val threadId: ThreadId) : Screen()
     data object Settings : Screen()
 }

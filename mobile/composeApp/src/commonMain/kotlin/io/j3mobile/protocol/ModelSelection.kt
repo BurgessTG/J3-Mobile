@@ -1,13 +1,38 @@
 package io.j3mobile.protocol
 
-import kotlinx.serialization.SerialName
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
 /** Identifies an LLM provider backend. */
-@Serializable
+@Serializable(with = ProviderKindSerializer::class)
 enum class ProviderKind {
-    @SerialName("codex") CODEX,
-    @SerialName("claudeAgent") CLAUDE_AGENT,
+    CODEX,
+    CLAUDE_AGENT,
+}
+
+object ProviderKindSerializer : KSerializer<ProviderKind> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("ProviderKind", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): ProviderKind {
+        return when (decoder.decodeString().trim()) {
+            "claudeAgent", "claude_agent" -> ProviderKind.CLAUDE_AGENT
+            else -> ProviderKind.CODEX
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: ProviderKind) {
+        val serialized = when (value) {
+            ProviderKind.CODEX -> "codex"
+            ProviderKind.CLAUDE_AGENT -> "claudeAgent"
+        }
+        encoder.encodeString(serialized)
+    }
 }
 
 /** Specifies which provider and model to use for a turn. */

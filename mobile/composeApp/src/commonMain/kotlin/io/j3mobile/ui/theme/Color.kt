@@ -2,17 +2,17 @@ package io.j3mobile.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Dark theme colors (primary palette - dark-first, coding tool aesthetic)
-val J3Dark = Color(0xFF0D1117)           // GitHub dark bg
-val J3DarkSurface = Color(0xFF161B22)    // Slightly lighter surface
-val J3DarkCard = Color(0xFF21262D)       // Card/container
-val J3Primary = Color(0xFF58A6FF)        // Blue accent (links, primary actions)
-val J3Secondary = Color(0xFF3FB950)      // Green (success, running)
-val J3Error = Color(0xFFF85149)          // Red (errors, destructive)
-val J3Warning = Color(0xFFD29922)        // Yellow/amber (warnings, pending)
-val J3OnDark = Color(0xFFE6EDF3)         // Primary text on dark
-val J3OnDarkSecondary = Color(0xFF8B949E) // Secondary text
-val J3Border = Color(0xFF30363D)         // Borders/dividers
+// T3-inspired neutral dark palette
+val J3Dark = Color(0xFF1B1B1B)
+val J3DarkSurface = Color(0xFF202020)
+val J3DarkCard = Color(0xFF262626)
+val J3Primary = Color(0xFFEAEAEA)
+val J3Secondary = Color(0xFF7EE787)
+val J3Error = Color(0xFFF85149)
+val J3Warning = Color(0xFFD29922)
+val J3OnDark = Color(0xFFF3F3F3)
+val J3OnDarkSecondary = Color(0xFF9A9A9A)
+val J3Border = Color(0xFF313131)
 
 // Light theme colors
 val J3Light = Color(0xFFFFFFFF)

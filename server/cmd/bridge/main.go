@@ -2,18 +2,20 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/BurgessTG/J3-Mobile/server/internal/auth"
+	"github.com/BurgessTG/J3-Mobile/server/internal/bridge"
 	"github.com/BurgessTG/J3-Mobile/server/internal/config"
-	"github.com/go-chi/chi/v5"
+	"github.com/BurgessTG/J3-Mobile/server/internal/downstream"
+	"github.com/BurgessTG/J3-Mobile/server/internal/pairtoken"
+	"github.com/BurgessTG/J3-Mobile/server/internal/upstream"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/joho/godotenv"
-	"github.com/rs/cors"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -34,52 +36,90 @@ func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	log.Logger = logger
 
+	tokenStorePath, err := pairtoken.DefaultPath()
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to resolve pair token store path")
+	}
+
+	authenticator := &auth.Authenticator{
+		PairingTokens:  pairtoken.NewStore(tokenStorePath),
+		JWTSecret:      cfg.JWTSecret,
+		AllowLegacyJWT: cfg.AllowLegacyJWT,
+	}
+
 	logger.Info().
-		Str("port", cfg.Port).
-		Str("upstream_url", cfg.UpstreamURL).
+		Str("listen_addr", cfg.ListenAddr).
+		Str("public_base_url", cfg.PublicBaseURL).
+		Str("upstream_url", cfg.UpstreamLogURL).
+		Str("auth_mode", authenticator.HealthMode()).
+		Str("token_store", tokenStorePath).
 		Msg("J3 Bridge starting")
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Recoverer)
-	r.Use(requestLogger(logger))
+	upstreamClient := upstream.NewClient(cfg.UpstreamURL, cfg.UpstreamAuthToken, logger)
+	bridgeServer := bridge.New(upstreamClient, logger)
 
-	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"*"},
-		AllowCredentials: false,
-	})
-	r.Use(c.Handler)
+	startCtx, startCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer startCancel()
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	if err := bridgeServer.Start(startCtx); err != nil {
+		logger.Error().Err(err).Msg("bridge startup failed")
+		if closeErr := upstreamClient.Close(); closeErr != nil {
+			logger.Warn().Err(closeErr).Msg("failed to close upstream client")
+		}
+		os.Exit(1)
+	}
+	defer func() {
+		if err := upstreamClient.Close(); err != nil {
+			logger.Warn().Err(err).Msg("failed to close upstream client")
+		}
+	}()
+
+	r := downstream.NewRouter(bridgeServer, downstream.RouterConfig{
+		Authenticator: authenticator,
+		ListenAddr:    cfg.ListenAddr,
+		PublicBaseURL: cfg.PublicBaseURL,
 	})
+	handler := requestLogger(logger)(r)
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.Port,
-		Handler: r,
+		Addr:              cfg.ListenAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
 
+	errCh := make(chan error, 1)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal().Err(err).Msg("server failed")
-		}
+		errCh <- srv.ListenAndServe()
 	}()
 
-	<-done
-	logger.Info().Msg("shutting down")
+	select {
+	case <-done:
+		logger.Info().Msg("shutting down")
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			logger.Error().Err(err).Msg("server failed")
+			if closeErr := upstreamClient.Close(); closeErr != nil {
+				logger.Warn().Err(closeErr).Msg("failed to close upstream client")
+			}
+			os.Exit(1)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Fatal().Err(err).Msg("shutdown failed")
+		logger.Error().Err(err).Msg("shutdown failed")
+		if closeErr := upstreamClient.Close(); closeErr != nil {
+			logger.Warn().Err(closeErr).Msg("failed to close upstream client")
+		}
+		os.Exit(1)
 	}
 
 	logger.Info().Msg("server stopped")
