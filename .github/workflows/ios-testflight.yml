@@ -1,0 +1,71 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      marketing_version:
+        description: Marketing version for CFBundleShortVersionString
+        required: true
+        default: 0.1.0
+      build_number:
+        description: Optional CFBundleVersion override
+        required: false
+      internal_only:
+        description: Limit this upload to internal TestFlight testers
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  upload:
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile
+    env:
+      IOS_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+      IOS_APP_NAME: ${{ vars.IOS_APP_NAME }}
+      IOS_MARKETING_VERSION: ${{ inputs.marketing_version }}
+      IOS_BUILD_NUMBER: ${{ inputs.build_number }}
+      IOS_INTERNAL_ONLY: ${{ inputs.internal_only }}
+      APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+      APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+      APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Validate release configuration
+        run: |
+          required=(
+            IOS_TEAM_ID
+            IOS_BUNDLE_ID
+            APP_STORE_CONNECT_API_KEY_ID
+            APP_STORE_CONNECT_API_KEY_ISSUER_ID
+            APP_STORE_CONNECT_API_KEY_BASE64
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "Missing required secret: ${name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload to TestFlight
+        run: ./scripts/ios/upload_testflight.sh
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-testflight-artifacts
+          path: mobile/ios-build

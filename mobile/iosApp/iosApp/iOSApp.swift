@@ -1,11 +1,10 @@
 import SwiftUI
 
 @main
-struct iOSApp: App {
+struct J3MobileiOSApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .preferredColorScheme(.dark)
         }
     }
 }

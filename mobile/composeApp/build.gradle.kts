@@ -25,6 +25,7 @@ kotlin {
         target.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            binaryOption("bundleId", "io.j3mobile.composeapp")
         }
     }
 

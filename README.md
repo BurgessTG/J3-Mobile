@@ -40,7 +40,9 @@ cd mobile
 ./gradlew composeApp:compileDebugKotlinAndroid  # Android compile check
 ```
 
-For iOS, the `mobile/iosApp` folder contains the SwiftUI host shell that embeds `MainViewController()` from the shared KMP module. Wire that shell into an Xcode app target and run it in the simulator.
+For iPhone setup, Xcode packaging, and TestFlight release flow, see `mobile/README.md`.
+
+The `mobile/iosApp` folder contains the SwiftUI host shell that embeds `MainViewController()` from the shared KMP module.
 
 ### Remote Access With Tailscale
 

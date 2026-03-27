@@ -17,12 +17,18 @@ mobile/composeApp/build/
 mobile/local.properties
 mobile/captures/
 mobile/.cxx/
+mobile/ios-build/
+mobile/private_keys/
+mobile/iosApp/Configuration/Local.xcconfig
 *.apk
 *.aab
 *.ap_
 *.dex
 *.class
 *.jar
+*.ipa
+*.xcarchive
+*.xcresult
 
 # IDE
 .idea/
