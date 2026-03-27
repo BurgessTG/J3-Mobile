@@ -1,36 +1,32 @@
 package io.j3mobile.ui.screens
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
-import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,52 +35,34 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.j3mobile.di.ConnectionManager
+import io.j3mobile.domain.BridgeSettingsRepository
 import io.j3mobile.network.ConnectionState
-import io.j3mobile.protocol.ModelSelection
-import io.j3mobile.protocol.OrchestrationProject
-import io.j3mobile.protocol.OrchestrationThread
-import io.j3mobile.protocol.ProviderKind
-import io.j3mobile.protocol.ThreadId
-import io.j3mobile.ui.theme.J3Border
-import io.j3mobile.ui.theme.J3DarkCard
-import io.j3mobile.ui.util.formatRelativeTime
+import io.j3mobile.ui.components.ConnectionStatusBar
+import io.j3mobile.ui.components.ProjectListItem
+import io.j3mobile.ui.theme.J3OnDarkSecondary
+import io.j3mobile.viewmodel.ProjectListViewModel
 import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProjectsScreen(
-    connectionState: ConnectionState,
-    projects: List<OrchestrationProject>,
-    threads: List<OrchestrationThread>,
-    onThreadSelected: (String) -> Unit,
-    onCreateProject: suspend (String, String) -> Unit,
-    onCreateThread: suspend (String, String, ModelSelection, String) -> ThreadId,
-    onSettingsClick: () -> Unit,
-    onRetry: () -> Unit,
+    onProjectSelected: (String) -> Unit = {},
+    onSettingsClick: () -> Unit = {},
 ) {
+    val connectionManager: ConnectionManager = koinInject()
+    val vm = remember { ProjectListViewModel(connectionManager) }
+    val projects by vm.projects.collectAsState()
+    val connectionState by connectionManager.connectionState.collectAsState()
+    val isConnected = connectionState is ConnectionState.Connected
     val scope = rememberCoroutineScope()
-    var newestFirst by rememberSaveable { mutableStateOf(true) }
+    val settingsRepository = remember { BridgeSettingsRepository() }
+
     var showCreateProjectDialog by rememberSaveable { mutableStateOf(false) }
     var projectTitle by rememberSaveable { mutableStateOf("") }
     var workspaceRoot by rememberSaveable { mutableStateOf("") }
-
-    val threadsByProject = remember(projects, threads, newestFirst) {
-        projects.associate { project ->
-            val projectThreads = threads
-                .filter { it.projectId == project.id }
-                .sortedBy { it.updatedAt }
-                .let { if (newestFirst) it.reversed() else it }
-            project.id.value to projectThreads
-        }
-    }
-    val sortedProjects = remember(projects, threadsByProject, newestFirst) {
-        projects.sortedBy { project ->
-            threadsByProject[project.id.value]?.firstOrNull()?.updatedAt ?: project.updatedAt
-        }.let { if (newestFirst) it.reversed() else it }
-    }
 
     LaunchedEffect(showCreateProjectDialog) {
         if (!showCreateProjectDialog) {
@@ -116,9 +94,7 @@ fun ProjectsScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        scope.launch {
-                            onCreateProject(projectTitle.trim(), workspaceRoot.trim())
-                        }
+                        vm.createProject(projectTitle, workspaceRoot)
                         showCreateProjectDialog = false
                     },
                     enabled = projectTitle.isNotBlank() && workspaceRoot.isNotBlank(),
@@ -134,181 +110,108 @@ fun ProjectsScreen(
         )
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "PROJECTS",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    IconButton(onClick = { newestFirst = !newestFirst }) {
-                        Icon(
-                            imageVector = Icons.Outlined.SwapVert,
-                            contentDescription = "Toggle project sort",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = { showCreateProjectDialog = true }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Add,
-                            contentDescription = "Add project",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = when (connectionState) {
-                        ConnectionState.Disconnected -> "Disconnected"
-                        ConnectionState.Connecting -> "Connecting"
-                        is ConnectionState.Connected -> "Connected"
-                        is ConnectionState.Reconnecting -> "Reconnecting"
-                        is ConnectionState.Error -> "Connection error"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (connectionState !is ConnectionState.Connected) {
-                        TextButton(onClick = onRetry) {
-                            Text("Retry")
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "Projects",
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                },
+                actions = {
+                    if (isConnected) {
+                        IconButton(onClick = { showCreateProjectDialog = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "Add project")
                         }
                     }
-                    TextButton(onClick = onSettingsClick) {
-                        Text("Bridge")
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            if (sortedProjects.isEmpty()) {
-                Text(
-                    text = "No projects yet.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(sortedProjects, key = { it.id.value }) { project ->
-                        val projectThreads = threadsByProject[project.id.value].orEmpty()
-                        ProjectSection(
-                            project = project,
-                            threads = projectThreads,
-                            onThreadSelected = onThreadSelected,
-                            onCreateThread = {
-                                val inferredSelection = inferThreadModel(project, projectThreads)
-                                val inferredRuntimeMode = projectThreads.firstOrNull()?.runtimeMode ?: "full-access"
-                                scope.launch {
-                                    val threadId = onCreateThread(
-                                        project.id.value,
-                                        "New thread",
-                                        inferredSelection,
-                                        inferredRuntimeMode,
-                                    )
-                                    onThreadSelected(threadId.value)
-                                }
-                            },
-                        )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
+            )
+        },
+    ) { paddingValues ->
+        Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            ConnectionStatusBar(
+                connectionState = connectionState,
+                onRetry = {
+                    val saved = settingsRepository.load() ?: return@ConnectionStatusBar
+                    scope.launch {
+                        runCatching {
+                            connectionManager.connect(saved.baseUrl, saved.jwt, scope)
+                        }
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProjectSection(
-    project: OrchestrationProject,
-    threads: List<OrchestrationThread>,
-    onThreadSelected: (String) -> Unit,
-    onCreateThread: () -> Unit,
-) {
-    var expanded by rememberSaveable(project.id.value) { mutableStateOf(true) }
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .clickable { expanded = !expanded }
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Icon(
-                imageVector = if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.AutoMirrored.Outlined.KeyboardArrowRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                },
+                onSettings = onSettingsClick,
             )
-            Icon(
-                imageVector = Icons.Outlined.Folder,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = project.title,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            TextButton(onClick = onCreateThread) {
-                Text("New")
-            }
-        }
 
-        if (expanded) {
-            if (threads.isEmpty()) {
-                Text(
-                    text = "No threads yet.",
-                    modifier = Modifier.padding(start = 42.dp, top = 6.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 11.dp, top = 6.dp),
-                ) {
+            when {
+                !isConnected -> {
                     Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .height((threads.size * 56).dp.coerceAtLeast(36.dp))
-                            .background(J3Border),
-                    )
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Not connected",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = J3OnDarkSecondary,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Connect to your bridge server to see projects.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = J3OnDarkSecondary,
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            TextButton(onClick = onSettingsClick) {
+                                Text("Go to Settings")
+                            }
+                        }
+                    }
+                }
+
+                projects.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "No projects yet.",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = J3OnDarkSecondary,
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "Projects from your T3 Code\nserver will appear here.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = J3OnDarkSecondary,
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            TextButton(onClick = { showCreateProjectDialog = true }) {
+                                Text("Add Project")
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    LazyColumn(
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        threads.forEach { thread ->
-                            ThreadRow(
-                                thread = thread,
-                                onClick = { onThreadSelected(thread.id.value) },
+                        items(
+                            items = projects,
+                            key = { it.id.value },
+                        ) { project ->
+                            ProjectListItem(
+                                project = project,
+                                onClick = { onProjectSelected(project.id.value) },
                             )
                         }
                     }
@@ -316,57 +219,4 @@ private fun ProjectSection(
             }
         }
     }
-}
-
-@Composable
-private fun ThreadRow(
-    thread: OrchestrationThread,
-    onClick: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick),
-        color = J3DarkCard,
-        shape = RoundedCornerShape(18.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = thread.title.ifBlank { "New thread" },
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            val relativeTime = formatRelativeTime(thread.updatedAt)
-            if (relativeTime.isNotBlank()) {
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = relativeTime,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-    }
-}
-
-private fun inferThreadModel(
-    project: OrchestrationProject,
-    threads: List<OrchestrationThread>,
-): ModelSelection {
-    return project.defaultModelSelection
-        ?: threads.firstOrNull { it.modelSelection.model.isNotBlank() }?.modelSelection
-        ?: threads.firstOrNull()?.modelSelection
-        ?: ModelSelection(
-            provider = ProviderKind.CODEX,
-            model = "",
-        )
 }
