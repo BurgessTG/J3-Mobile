@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -52,12 +53,14 @@ import org.koin.compose.koinInject
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit = {},
+    onSaved: () -> Unit = {},
 ) {
     val connectionManager: ConnectionManager = koinInject()
     val vm = remember { SettingsViewModel(connectionManager) }
     val connectionState by vm.connectionState.collectAsState()
     val bridgeUrl by vm.bridgeUrl.collectAsState()
     val authToken by vm.authToken.collectAsState()
+    val hasSavedSettings by vm.hasSavedSettings.collectAsState()
 
     Scaffold(
         topBar = {
@@ -84,7 +87,6 @@ fun SettingsScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // Connection status card
             Card(
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(containerColor = J3DarkSurface),
@@ -121,41 +123,47 @@ fun SettingsScreen(
                 }
             }
 
-            // Bridge URL
             OutlinedTextField(
                 value = bridgeUrl,
                 onValueChange = { vm.updateBridgeUrl(it) },
                 label = { Text("Bridge URL") },
-                placeholder = { Text("http://localhost:4080") },
+                placeholder = { Text("http://127.0.0.1:8181") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.labelSmall,
             )
 
-            // Auth Token
             OutlinedTextField(
                 value = authToken,
                 onValueChange = { vm.updateAuthToken(it) },
-                label = { Text("Auth Token") },
+                label = { Text("Pairing Token") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
             )
 
-            // Connect / Disconnect
-            val isConnected = connectionState is ConnectionState.Connected
             FilledTonalButton(
                 onClick = {
-                    if (isConnected) vm.disconnect() else vm.connect()
+                    vm.saveAndConnect()
+                    onSaved()
                 },
                 modifier = Modifier.fillMaxWidth(),
+                enabled = bridgeUrl.isNotBlank() && authToken.isNotBlank(),
             ) {
-                Text(if (isConnected) "Disconnect" else "Connect")
+                Text("Save and Connect")
+            }
+
+            if (hasSavedSettings || connectionState !is ConnectionState.Disconnected) {
+                TextButton(
+                    onClick = { vm.clearSavedConnection() },
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("Disconnect and Forget", color = J3Error)
+                }
             }
 
             Spacer(Modifier.height(24.dp))
 
-            // About section
             Text(
                 text = "J3 Mobile v0.1.0",
                 style = MaterialTheme.typography.bodySmall,

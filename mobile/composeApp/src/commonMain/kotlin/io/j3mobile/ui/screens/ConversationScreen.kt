@@ -31,11 +31,7 @@ fun ConversationScreen(
     onTerminal: () -> Unit = {},
 ) {
     val connectionManager: ConnectionManager = koinInject()
-    val threadRepo = connectionManager.threadRepo ?: return
-
-    val vm = remember(threadId) {
-        ConversationViewModel(threadId, connectionManager.store, threadRepo)
-    }
+    val vm = remember(threadId) { ConversationViewModel(threadId, connectionManager) }
 
     val thread by vm.thread.collectAsState()
     val messages by vm.messages.collectAsState()
@@ -71,8 +67,8 @@ fun ConversationScreen(
             activities = activities,
             checkpoints = checkpoints,
             pendingApproval = pendingApproval,
-            onApprove = { info -> vm.respondToApproval(info.requestId, "approved") },
-            onReject = { info -> vm.respondToApproval(info.requestId, "rejected") },
+            onApprove = { info -> vm.respondToApproval(info.requestId, "approve") },
+            onReject = { info -> vm.respondToApproval(info.requestId, "deny") },
             onRevertCheckpoint = { turnCount -> vm.revertCheckpoint(turnCount) },
             modifier = Modifier
                 .fillMaxSize()

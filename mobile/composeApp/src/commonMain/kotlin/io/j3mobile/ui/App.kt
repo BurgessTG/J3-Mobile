@@ -1,17 +1,20 @@
 package io.j3mobile.ui
 
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import io.j3mobile.di.ConnectionManager
 import io.j3mobile.di.appModule
+import io.j3mobile.domain.BridgeSettingsRepository
 import io.j3mobile.protocol.ProjectId
-import io.j3mobile.protocol.ThreadId
 import io.j3mobile.ui.navigation.Screen
 import io.j3mobile.ui.screens.ConversationScreen
 import io.j3mobile.ui.screens.ProjectsScreen
@@ -20,13 +23,29 @@ import io.j3mobile.ui.screens.TerminalScreen
 import io.j3mobile.ui.screens.ThreadListScreen
 import io.j3mobile.ui.theme.J3MobileTheme
 import org.koin.compose.KoinApplication
+import org.koin.compose.koinInject
 
 @Composable
 fun J3MobileApp() {
     KoinApplication(application = { modules(appModule) }) {
+        val connectionManager: ConnectionManager = koinInject()
+        val scope = rememberCoroutineScope()
+        val settingsRepository = remember { BridgeSettingsRepository() }
+        val savedSettings = remember { settingsRepository.load() }
+
         J3MobileTheme {
-            var currentScreen by remember { mutableStateOf<Screen>(Screen.Projects) }
+            var currentScreen by remember {
+                mutableStateOf<Screen>(if (savedSettings == null) Screen.Settings else Screen.Projects)
+            }
             var lastProjectId by remember { mutableStateOf<ProjectId?>(null) }
+
+            LaunchedEffect(savedSettings) {
+                if (savedSettings != null && connectionManager.threadRepo == null) {
+                    runCatching {
+                        connectionManager.connect(savedSettings.baseUrl, savedSettings.jwt, scope)
+                    }
+                }
+            }
 
             Surface(
                 modifier = Modifier.fillMaxSize(),
@@ -73,6 +92,9 @@ fun J3MobileApp() {
                     )
 
                     is Screen.Settings -> SettingsScreen(
+                        onSaved = {
+                            currentScreen = Screen.Projects
+                        },
                         onBack = {
                             currentScreen = Screen.Projects
                         },

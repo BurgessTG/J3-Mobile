@@ -7,7 +7,6 @@ import io.j3mobile.protocol.ModelSelection
 import io.j3mobile.protocol.OrchestrationProject
 import io.j3mobile.protocol.OrchestrationThread
 import io.j3mobile.protocol.ProjectId
-import io.j3mobile.protocol.ThreadId
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -28,13 +27,8 @@ class ThreadViewModel(
     fun createThread(title: String, modelSelection: ModelSelection) {
         viewModelScope.launch {
             val threadRepo = connectionManager.threadRepo ?: return@launch
-            val threadId = ThreadId(generateId())
-            threadRepo.createThread(threadId, projectId, title, modelSelection)
+            val threadId = threadRepo.newThreadId()
+            threadRepo.createThread(threadId, projectId, title.trim(), modelSelection)
         }
-    }
-
-    private fun generateId(): String {
-        val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-        return (1..12).map { chars.random() }.joinToString("")
     }
 }

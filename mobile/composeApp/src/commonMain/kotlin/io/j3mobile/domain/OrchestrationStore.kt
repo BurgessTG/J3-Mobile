@@ -1,6 +1,5 @@
 package io.j3mobile.domain
 
-import io.j3mobile.protocol.OrchestrationEvent
 import io.j3mobile.protocol.OrchestrationProject
 import io.j3mobile.protocol.OrchestrationReadModel
 import io.j3mobile.protocol.OrchestrationThread
@@ -17,18 +16,16 @@ class OrchestrationStore {
     val readModel: StateFlow<OrchestrationReadModel?> = _readModel.asStateFlow()
 
     fun loadSnapshot(model: OrchestrationReadModel) {
-        _readModel.value = model
+        _readModel.value = model.copy(
+            projects = model.projects.filter { it.deletedAt == null },
+            threads = model.threads.filter { it.deletedAt == null },
+        )
     }
 
-    fun applyEvent(event: OrchestrationEvent) {
-        val current = _readModel.value ?: return
-        _readModel.value = current.copy(
-            snapshotSequence = event.sequence,
-            updatedAt = event.occurredAt,
-        )
-        // Note: Full event application (updating projects/threads/messages)
-        // will be implemented incrementally. For now, the mobile client
-        // re-fetches the snapshot periodically or on key events.
+    fun applyEventRefreshOnly() {
+        // Snapshot refreshes are the source of truth for the mobile client.
+        // Event payloads are used only to trigger a refetch, not to mutate
+        // the model incrementally in the app.
     }
 
     val projects: Flow<List<OrchestrationProject>>
