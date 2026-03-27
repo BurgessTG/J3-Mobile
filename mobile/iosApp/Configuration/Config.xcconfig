@@ -1,0 +1,4 @@
+APP_NAME = J3 Mobile
+BUNDLE_ID = io.j3mobile
+TEAM_ID =
+#include? "Local.xcconfig"

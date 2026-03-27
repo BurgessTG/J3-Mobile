@@ -25,6 +25,7 @@ kotlin {
         target.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            binaryOption("bundleId", "io.j3mobile.composeapp")
         }
     }
 
@@ -33,6 +34,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(compose.ui)
             implementation(compose.components.resources)
 
             implementation(libs.kotlinx.serialization.json)

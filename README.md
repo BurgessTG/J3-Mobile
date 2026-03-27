@@ -35,6 +35,8 @@ cd mobile
 ./gradlew composeApp:installDebug  # Android
 ```
 
+For iPhone setup, Xcode packaging, and TestFlight release flow, see `mobile/README.md`.
+
 ## Development
 
 ```bash
