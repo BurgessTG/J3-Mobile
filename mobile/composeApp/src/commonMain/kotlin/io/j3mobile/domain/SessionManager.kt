@@ -1,38 +1,69 @@
 package io.j3mobile.domain
 
-import io.j3mobile.network.BridgeApiClient
-import io.j3mobile.network.BridgeWsClient
+import io.j3mobile.network.BridgeTransport
 import io.j3mobile.network.ConnectionState
 import io.j3mobile.protocol.OrchestrationEvent
+import io.j3mobile.protocol.ThreadId
 import io.j3mobile.protocol.WsChannels
 import io.j3mobile.protocol.WsPush
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.FlowPreview
+import kotlin.time.Duration.Companion.milliseconds
 
+@OptIn(FlowPreview::class)
 class SessionManager(
-    private val apiClient: BridgeApiClient,
-    private val wsClient: BridgeWsClient,
+    private val wsClient: BridgeTransport,
     private val store: OrchestrationStore,
+    private val loadSnapshot: suspend () -> Unit,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 8)
+    private val _pendingApproval = MutableStateFlow<PendingApproval?>(null)
+    val pendingApproval: StateFlow<PendingApproval?> = _pendingApproval.asStateFlow()
 
     val connectionState: StateFlow<ConnectionState> = wsClient.connectionState
+    private var started = false
+    private var refreshJob: Job? = null
 
-    /** Initialize: connect WS, load snapshot, subscribe to events. */
-    suspend fun initialize(scope: CoroutineScope) {
-        // Connect WebSocket
+    fun start(scope: CoroutineScope) {
+        if (started) return
+        started = true
+
         wsClient.connect(scope)
 
-        // Wait for connection
-        wsClient.connectionState.first { it is ConnectionState.Connected }
+        scope.launch {
+            connectionState.collectLatest { state ->
+                if (state is ConnectionState.Connected) {
+                    try {
+                        loadSnapshot()
+                    } catch (e: Exception) {
+                        println("SessionManager initial snapshot load failed: ${e.message}")
+                    }
+                }
+            }
+        }
 
-        // Load initial snapshot
-        loadSnapshot()
+        refreshJob = scope.launch {
+            refreshRequests
+                .debounce(250.milliseconds)
+                .collectLatest {
+                    try {
+                        loadSnapshot()
+                    } catch (e: Exception) {
+                        println("SessionManager refresh snapshot load failed: ${e.message}")
+                    }
+                }
+        }
 
-        // Subscribe to domain events
         scope.launch {
             wsClient.pushEvents.collect { push ->
                 handlePush(push)
@@ -40,13 +71,8 @@ class SessionManager(
         }
     }
 
-    private suspend fun loadSnapshot() {
-        try {
-            val snapshot = apiClient.getSnapshot()
-            store.loadSnapshot(snapshot)
-        } catch (_: Exception) {
-            // Log error, will retry on reconnect
-        }
+    fun requestSnapshotRefresh() {
+        refreshRequests.tryEmit(Unit)
     }
 
     private fun handlePush(push: WsPush) {
@@ -57,16 +83,27 @@ class SessionManager(
                         OrchestrationEvent.serializer(),
                         push.data,
                     )
-                    store.applyEvent(event)
-                } catch (_: Exception) {
-                    // Log deserialization error
+                    if (event.metadata.requestId != null) {
+                        _pendingApproval.value = PendingApproval(
+                            threadId = ThreadId(event.aggregateId),
+                            requestId = event.metadata.requestId,
+                            sourceEventType = event.type,
+                        )
+                    }
+                    store.applyEventRefreshOnly()
+                    requestSnapshotRefresh()
+                } catch (e: Exception) {
+                    println("SessionManager push handling failed: ${e.message}")
                 }
             }
             // Other channels can be handled here
         }
     }
 
-    fun disconnect() {
-        wsClient.disconnect()
+    fun stop() {
+        refreshJob?.cancel()
+        refreshJob = null
+        started = false
+        _pendingApproval.value = null
     }
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -15,19 +16,21 @@ import (
 // mobile clients. It caches the orchestration snapshot and fans out
 // push events.
 type Bridge struct {
-	Upstream *upstream.Client
-	Sessions *SessionManager
-	Snapshot *SnapshotCache
-	Logger   zerolog.Logger
+	Upstream  *upstream.Client
+	Sessions  *SessionManager
+	Snapshot  *SnapshotCache
+	Logger    zerolog.Logger
+	StartedAt time.Time
 }
 
 // New creates a Bridge with a fresh SessionManager and SnapshotCache.
 func New(upstreamClient *upstream.Client, logger zerolog.Logger) *Bridge {
 	return &Bridge{
-		Upstream: upstreamClient,
-		Sessions: NewSessionManager(),
-		Snapshot: NewSnapshotCache(),
-		Logger:   logger.With().Str("component", "bridge").Logger(),
+		Upstream:  upstreamClient,
+		Sessions:  NewSessionManager(),
+		Snapshot:  NewSnapshotCache(),
+		Logger:    logger.With().Str("component", "bridge").Logger(),
+		StartedAt: time.Now().UTC(),
 	}
 }
 
@@ -95,4 +98,12 @@ func (b *Bridge) LoadSnapshot(ctx context.Context) error {
 		Msg("snapshot loaded")
 
 	return nil
+}
+
+func (b *Bridge) SnapshotAvailable() bool {
+	return b.Snapshot.GetRaw() != nil
+}
+
+func (b *Bridge) Ready() bool {
+	return b.Upstream.IsConnected() && b.SnapshotAvailable()
 }

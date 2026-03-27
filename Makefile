@@ -1,4 +1,4 @@
-.PHONY: server-build server-test server-lint server-fmt mobile-build mobile-ios-open mobile-ios-archive mobile-ios-testflight check
+.PHONY: server-build server-test server-lint server-fmt server-launchd server-pair-token mobile-build mobile-ios-open mobile-ios-archive mobile-ios-testflight check
 
 # Go server
 server-build:
@@ -13,9 +13,15 @@ server-lint:
 server-fmt:
 	cd server && gofmt -l -w .
 
+server-launchd:
+	cd server && ./scripts/install-launchd.sh
+
+server-pair-token:
+	cd server && go run ./cmd/pair-token list
+
 # KMP mobile (commonMain + androidMain on Linux)
 mobile-build:
-	cd mobile && if [ -z "$$JAVA_HOME" ] && [ -x /usr/libexec/java_home ]; then export JAVA_HOME="$$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home 2>/dev/null)"; fi && ./gradlew composeApp:compileKotlinAndroid
+	cd mobile && if [ -z "$$JAVA_HOME" ] && [ -x /usr/libexec/java_home ]; then export JAVA_HOME="$$(/usr/libexec/java_home -v 21 2>/dev/null || /usr/libexec/java_home 2>/dev/null)"; fi && ./gradlew composeApp:compileDebugKotlinAndroid
 
 mobile-ios-open:
 	open mobile/iosApp/iosApp.xcodeproj

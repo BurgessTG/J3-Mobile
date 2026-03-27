@@ -1,6 +1,6 @@
 package io.j3mobile.domain
 
-import io.j3mobile.network.BridgeWsClient
+import io.j3mobile.network.BridgeTransport
 import io.j3mobile.protocol.ApprovalRequestId
 import io.j3mobile.protocol.MessageId
 import io.j3mobile.protocol.ModelSelection
@@ -15,8 +15,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 
-class ThreadRepository(private val wsClient: BridgeWsClient) {
+class ThreadRepository(private val wsClient: BridgeTransport) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    fun newThreadId(): ThreadId = ThreadId(generateId("thread"))
 
     suspend fun createProject(id: ProjectId, title: String, workspaceRoot: String): WsResponse {
         val command = buildJsonObject {
@@ -142,8 +144,12 @@ class ThreadRepository(private val wsClient: BridgeWsClient) {
     }
 
     private fun generateCommandId(): String {
+        return generateId("cmd")
+    }
+
+    private fun generateId(prefix: String): String {
         val chars = "abcdefghijklmnopqrstuvwxyz0123456789"
         val random = (1..12).map { chars.random() }.joinToString("")
-        return "cmd-$random"
+        return "$prefix-$random"
     }
 }
